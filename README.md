@@ -45,10 +45,28 @@ portrait screens), scrubbed over film seconds 0–12:
   mapped by the import map in `<head>`): plinth, carcasses, drawer and door fronts (handle-less
   with a grip groove, or classic framed with a knob), marble worktop and splash, wall units with a
   glass vitrin, fridge column, sink, hob or hood, island with waterfall ends and stools, and the
-  LED strips with warm lights. It loads when the section is ~600 px away, renders on demand, and
-  turns by dragging sideways (mouse drags also tilt; arrow keys on the focused view). The turn is
-  limited per plan type so a side wall never blocks the view. Without WebGL2, or until three.js
-  arrives, the SVG top-down plan shows instead. The figures are a first idea, not a quote.
+  LED strips with warm lights, a built-in oven under a wall hob, a steel sink with a gooseneck tap,
+  and pendant lights over the island. The floor is planks cut from the CC0 Poly Haven
+  `oak_veneer_01` photo (`img/tex/`, the same files as the Maviron demo). It starts loading once the
+  page has loaded (a "3D mutfak hazırlanıyor" note shows meanwhile), renders on demand, and turns by
+  dragging sideways (mouse drags also tilt; arrow keys on the focused view). While moving it renders
+  the plain pass (about 1–4 ms a frame); ~160 ms after it settles it renders once with GTAO ambient
+  occlusion, desktop only. The turn is limited per plan type so a side wall never blocks the view.
+  Without WebGL2 the SVG top-down plan shows instead. The figures are a first idea, not a quote.
+
+## Security
+
+- No third-party requests: fonts, three.js and all images are served from this repo.
+- Content-Security-Policy as a `<meta>` in `index.html` (GitHub Pages cannot set headers):
+  `default-src 'self'`, no inline styles, and the two inline scripts (the head class script and the
+  import map) allowed by their SHA-256 hashes. **After changing either of them, recompute the hashes**
+  (`base64(sha256(script text))`), or the page loses its film and its 3D view.
+- `frame-ancestors` and `X-Frame-Options` only work as HTTP headers; `vercel.json` sets the rest
+  of the headers if the site moves to Vercel or a host that reads it.
+- Forms write a WhatsApp message in the visitor's own app; nothing is posted to a server.
+  `innerHTML` is only fed numbers and fixed lookups, never the visitor's text.
+- CSS and script URLs carry `?v=N`; bump it with each change so the Pages cache (10 min) does not
+  serve the old file.
 - **Mağazalar**: Kırklareli shop and Pınarhisar workshop with map links.
 - **İletişim**: phones, e-mail and a form that writes a WhatsApp message (no server).
 

@@ -2,6 +2,8 @@
 <html lang="tr">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-LsXVJKzy9AFGn5WcKvH6h0zLUfVeDgG+D6ZHI8PV1JQ=' 'sha256-2/LPHbhirVUkWorJIDr1JcQFIyjS/3GjSki6yLPxSSE='; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-src 'none'; worker-src 'none'; manifest-src 'self'; upgrade-insecure-requests">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>D&amp;M Mutfak ve Banyo · Kırklareli</title>
 <meta name="description" content="D&amp;M Mutfak ve Banyo, Kırklareli. Mutfağınızı yerinde ölçer, kendi atölyemizde üretir ve kendi ekibimizle kurarız. Banyo, TV ünitesi ve özel ölçü mobilya.">
@@ -18,18 +20,19 @@
   document.documentElement.classList.add('js');
   if (!matchMedia('(prefers-reduced-motion: reduce)').matches && !/[?&]still\b/.test(location.search)) document.documentElement.classList.add('live-film');
 </script>
-<!-- three.js r180, served from js/vendor; loaded only when the 3D kitchen section is near -->
+<!-- three.js r180 and its addons, served from js/vendor; loaded by js/plan.js after the page -->
 <script type="importmap">
 {
   "imports": {
     "three": "./js/vendor/three.module.min.js",
     "three/addons/environments/RoomEnvironment.js": "./js/vendor/RoomEnvironment.js",
-    "three/addons/geometries/RoundedBoxGeometry.js": "./js/vendor/RoundedBoxGeometry.js"
+    "three/addons/geometries/RoundedBoxGeometry.js": "./js/vendor/RoundedBoxGeometry.js",
+    "three/addons/": "./js/vendor/addons/"
   }
 }
 </script>
 <link rel="preload" href="fonts/jost-latin.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="css/site.css?v=3">
+<link rel="stylesheet" href="css/site.css?v=6">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -46,7 +49,7 @@
 </script>
 </head>
 <body>
-<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<svg class="sprite" width="0" height="0" aria-hidden="true">
   <!-- the D&M disc: d and m drawn as in their sign, gold on the left half of the d and the first arch of the m -->
   <symbol id="mark" viewBox="0 0 100 100">
     <circle cx="50" cy="50" r="49" fill="#141412"/>
@@ -244,7 +247,7 @@
         </ul>
       </div>
       <div>
-        <figure class="compare" id="compare" style="--cut:50%">
+        <figure class="compare" id="compare">
           <picture><source media="(max-width:600px)" srcset="img/film/3-gunduz-m.webp"><img src="img/film/3-gunduz.webp" width="1920" height="1080" loading="lazy" alt="Mutfak gündüz ışığında"></picture>
           <picture><source media="(max-width:600px)" srcset="img/film/4-aksam-m.webp"><img class="eve" src="img/film/4-aksam.webp" width="1920" height="1080" loading="lazy" alt="Aynı mutfak akşam, gizli LED’ler yanık"></picture>
           <span class="lab d">Gündüz</span><span class="lab e">Akşam</span>
@@ -318,11 +321,11 @@
         <fieldset>
           <legend>Renk</legend>
           <div class="chips">
-            <label><input type="radio" name="renk" value="grej" checked><span><i style="background:#b9b0a5"></i>Grej</span></label>
-            <label><input type="radio" name="renk" value="krem"><span><i style="background:#e6dccb"></i>Krem</span></label>
-            <label><input type="radio" name="renk" value="beyaz"><span><i style="background:#f3f2ee"></i>Beyaz</span></label>
-            <label><input type="radio" name="renk" value="gri"><span><i style="background:#7d8184"></i>Gri</span></label>
-            <label><input type="radio" name="renk" value="antrasit"><span><i style="background:#34363a"></i>Antrasit</span></label>
+            <label><input type="radio" name="renk" value="grej" checked><span><i class="sw-grej"></i>Grej</span></label>
+            <label><input type="radio" name="renk" value="krem"><span><i class="sw-krem"></i>Krem</span></label>
+            <label><input type="radio" name="renk" value="beyaz"><span><i class="sw-beyaz"></i>Beyaz</span></label>
+            <label><input type="radio" name="renk" value="gri"><span><i class="sw-gri"></i>Gri</span></label>
+            <label><input type="radio" name="renk" value="antrasit"><span><i class="sw-antrasit"></i>Antrasit</span></label>
           </div>
         </fieldset>
         <fieldset>
@@ -392,7 +395,7 @@
         <div class="field"><label for="ct-where">İlçe / mahalle</label><input id="ct-where" name="where" placeholder="Örn. Lüleburgaz"></div>
         <fieldset>
           <legend>Ne yaptırmak istiyorsunuz?</legend>
-          <div class="chips" style="margin-top:10px">
+          <div class="chips chips--gap">
             <label><input type="checkbox" name="need" value="Mutfak" checked><span>Mutfak</span></label>
             <label><input type="checkbox" name="need" value="Banyo"><span>Banyo</span></label>
             <label><input type="checkbox" name="need" value="TV ünitesi"><span>TV ünitesi</span></label>
@@ -425,6 +428,6 @@
 </div>
 
 <script src="js/site.js?v=3"></script>
-<script src="js/plan.js?v=4"></script>
+<script src="js/plan.js?v=6"></script>
 </body>
 </html>

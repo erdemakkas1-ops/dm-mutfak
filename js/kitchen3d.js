@@ -3,6 +3,9 @@
 // 72 cm carcass, 4 cm worktop (86 cm in all); wall units hang from 145 cm, 72 cm tall, 35 cm deep.
 // It renders on demand: after a change, a drag or a resize. Drag sideways (or arrow keys) to turn it;
 // on touch screens a vertical swipe still scrolls the page.
+// Realism without losing responsiveness: while the view is moving or a slider is dragged it renders
+// the plain pass; ~160 ms after it settles it renders once more with ground-truth ambient occlusion
+// (GTAO, desktop only). Floor and walnut use CC0 oak veneer from Poly Haven (img/tex/).
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
@@ -27,66 +30,98 @@ export function mount(box) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#e9e7e2');
   scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), .04).texture;
-  scene.environmentIntensity = .4;
+  scene.environmentIntensity = .45;
   const camera = new THREE.PerspectiveCamera(32, 1, .1, 60);
 
-  // ---- textures drawn once on canvases: marble worktop, oak floor ----
-  const canvasTex = (w, h, draw, rep) => {
-    const c = document.createElement('canvas'); c.width = w; c.height = h;
-    draw(c.getContext('2d'), w, h);
-    const t = new THREE.CanvasTexture(c);
-    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+  // ---- textures ----
+  let seed = 11;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const finish = (t, srgb, rep) => {
+    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    if (srgb) t.colorSpace = THREE.SRGBColorSpace;
     if (rep) t.repeat.set(...rep);
     return t;
   };
-  let seed = 11;
-  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-  const marble = canvasTex(512, 512, (k, w, h) => {
-    k.fillStyle = '#f1eee9'; k.fillRect(0, 0, w, h);
-    for (let v = 0; v < 16; v++) {
-      k.strokeStyle = `rgba(125,118,110,${.06 + rnd() * .2})`; k.lineWidth = .6 + rnd() * 2;
-      k.beginPath(); let x = rnd() * w, y = 0; k.moveTo(x, y);
-      while (y < h) { x += (rnd() - .45) * 70; y += 18 + rnd() * 40; k.lineTo(x, y); }
-      k.stroke();
-    }
-  });
-  const oak = canvasTex(512, 512, (k, w, h) => {
-    // 8 planks across, warm light oak with grain streaks
-    for (let i = 0; i < 8; i++) {
-      const l = 66 + rnd() * 7;
-      k.fillStyle = `hsl(33, 24%, ${l}%)`; k.fillRect(0, i * h / 8, w, h / 8);
-      for (let g = 0; g < 40; g++) {
-        k.strokeStyle = `rgba(110,75,40,${.04 + rnd() * .08})`; k.lineWidth = .5 + rnd();
-        const y = i * h / 8 + rnd() * h / 8; k.beginPath(); k.moveTo(0, y); k.bezierCurveTo(w * .3, y + rnd() * 4 - 2, w * .6, y + rnd() * 4 - 2, w, y); k.stroke();
+  // Calacatta-like marble: soft wide veins under thin dark ones, drawn once
+  const marble = (() => {
+    const c = document.createElement('canvas'); c.width = c.height = 1024;
+    const k = c.getContext('2d');
+    k.fillStyle = '#f2f0ec'; k.fillRect(0, 0, 1024, 1024);
+    const vein = (alpha, width, blur, n) => {
+      k.filter = blur ? `blur(${blur}px)` : 'none';
+      for (let v = 0; v < n; v++) {
+        k.strokeStyle = `rgba(118,110,100,${alpha * (.5 + rnd())})`; k.lineWidth = width * (.5 + rnd());
+        k.beginPath(); let x = rnd() * 1024, y = -20; k.moveTo(x, y);
+        while (y < 1044) { const nx = x + (rnd() - .48) * 110, ny = y + 30 + rnd() * 60; k.quadraticCurveTo(x + (rnd() - .5) * 60, (y + ny) / 2, nx, ny); x = nx; y = ny; }
+        k.stroke();
       }
-      k.fillStyle = 'rgba(60,40,20,.35)'; k.fillRect(0, i * h / 8, w, 1.2);
-      k.fillRect(rnd() * w, i * h / 8, 1.2, h / 8);
+    };
+    vein(.1, 14, 10, 7); vein(.16, 3, 1.5, 10); vein(.28, 1, 0, 14);
+    k.filter = 'none';
+    return finish(new THREE.CanvasTexture(c), true);
+  })();
+  // the oak floor: planks cut from the veneer photo, each with its own offset and tone, joints between
+  const floorMap = (() => {
+    const c = document.createElement('canvas'); c.width = c.height = 1024;
+    const k = c.getContext('2d');
+    k.fillStyle = '#c9b597'; k.fillRect(0, 0, 1024, 1024);
+    return { canvas: c, tex: finish(new THREE.CanvasTexture(c), true, [12 / 1.44, 12 / 1.44]) };
+  })();
+  const loader = new THREE.TextureLoader();
+  const img = new Image();
+  img.onload = () => {
+    // 8 rows of 18 cm planks over 1.44 m, plank lengths 0.7–1.4 m, staggered
+    const k = floorMap.canvas.getContext('2d'), row = 128;
+    for (let r = 0; r < 8; r++) {
+      let x = -rnd() * 600;
+      while (x < 1024) {
+        const len = 500 + rnd() * 500, sx = rnd() * (img.width - 300), sy = rnd() * (img.height - row);
+        k.drawImage(img, sx, sy, 300, row, x, r * row, len, row);
+        k.fillStyle = `rgba(${rnd() > .5 ? '255,236,210' : '60,40,20'},${rnd() * .12})`; k.fillRect(x, r * row, len, row);
+        k.fillStyle = 'rgba(55,38,22,.55)'; k.fillRect(x, r * row, 2, row);
+        x += len;
+      }
+      k.fillStyle = 'rgba(55,38,22,.5)'; k.fillRect(0, r * row, 1024, 2);
     }
-  }, [3, 3]);
+    // lighter and less orange, like the light oak in the film
+    k.globalCompositeOperation = 'saturation'; k.fillStyle = 'hsl(0,0%,50%)'; k.globalAlpha = .35; k.fillRect(0, 0, 1024, 1024);
+    k.globalCompositeOperation = 'screen'; k.fillStyle = '#5a5248'; k.globalAlpha = 1; k.fillRect(0, 0, 1024, 1024);
+    k.globalCompositeOperation = 'source-over';
+    floorMap.tex.needsUpdate = true;
+    settle();
+  };
+  img.src = 'img/tex/oak-diff.webp';
+  const oakNor = finish(loader.load('img/tex/oak-nor.webp', () => settle()), false, [12 / 1.44, 12 / 1.44 * 4]);
+  const walnutMap = finish(loader.load('img/tex/oak-diff.webp', () => settle()), true, [.6, .6]);
 
   // ---- materials ----
   const M = {
-    front: new THREE.MeshStandardMaterial({ roughness: .62 }),
+    front: new THREE.MeshPhysicalMaterial({ roughness: .62 }),
     carcass: new THREE.MeshStandardMaterial({ color: '#efede8', roughness: .8 }),
-    top: new THREE.MeshPhysicalMaterial({ map: marble, roughness: .25, clearcoat: .35, clearcoatRoughness: .25 }),
+    top: new THREE.MeshPhysicalMaterial({ map: marble, roughness: .22, clearcoat: .45, clearcoatRoughness: .18 }),
     plinth: new THREE.MeshStandardMaterial({ color: '#2b2926', roughness: .7 }),
     wall: new THREE.MeshStandardMaterial({ color: '#ebe8e2', roughness: .95 }),
-    splash: new THREE.MeshPhysicalMaterial({ map: marble, roughness: .3, clearcoat: .3 }),
+    splash: new THREE.MeshPhysicalMaterial({ map: marble, roughness: .25, clearcoat: .4, clearcoatRoughness: .2 }),
     black: new THREE.MeshStandardMaterial({ color: '#151515', roughness: .35, metalness: .2 }),
+    blackGlass: new THREE.MeshPhysicalMaterial({ color: '#0d0d0e', roughness: .08, clearcoat: 1, clearcoatRoughness: .05 }),
+    steel: new THREE.MeshStandardMaterial({ color: '#c9ccd0', roughness: .28, metalness: 1 }),
+    basin: new THREE.MeshStandardMaterial({ color: '#8d9095', roughness: .35, metalness: 1 }),
     glass: new THREE.MeshPhysicalMaterial({ color: '#d9d3c7', roughness: .05, transparent: true, opacity: .25, depthWrite: false }),
-    walnut: new THREE.MeshStandardMaterial({ color: '#6e4c33', roughness: .7 }),
+    walnut: new THREE.MeshStandardMaterial({ map: walnutMap, color: '#8a6446', roughness: .6 }),
     groove: new THREE.MeshStandardMaterial({ color: '#2a2927', roughness: .6 }),
     knob: new THREE.MeshStandardMaterial({ color: '#b9a37a', roughness: .3, metalness: .9 }),
     led: new THREE.MeshBasicMaterial({ color: '#ffd29a' }),
     seat: new THREE.MeshStandardMaterial({ color: '#1b1b1b', roughness: .55 }),
+    shade: new THREE.MeshStandardMaterial({ color: '#1c1c1c', roughness: .4, metalness: .3, side: THREE.DoubleSide }),
+    bulb: new THREE.MeshBasicMaterial({ color: '#fff1d6' }),
   };
 
   // ---- fixed set: floor, daylight, sky fill ----
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), new THREE.MeshStandardMaterial({ map: oak, roughness: .7 }));
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), new THREE.MeshStandardMaterial({ map: floorMap.tex, normalMap: oakNor, normalScale: new THREE.Vector2(.35, .35), roughness: .55 }));
   floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true;
   scene.add(floor);
-  scene.add(new THREE.HemisphereLight('#ffffff', '#b9a68f', .55));
-  const sun = new THREE.DirectionalLight('#fff6ea', 1.25);
+  scene.add(new THREE.HemisphereLight('#ffffff', '#b9a68f', .5));
+  const sun = new THREE.DirectionalLight('#fff4e4', 1.35);
   sun.castShadow = true;
   sun.shadow.mapSize.set(phone ? 1024 : 2048, phone ? 1024 : 2048);
   sun.shadow.bias = -.0004; sun.shadow.normalBias = .02;
@@ -161,8 +196,11 @@ export function mount(box) {
   function build(o, p) {
     if (group) scene.remove(group);
     group = new THREE.Group(); scene.add(group);
+    // handle-less fronts are matt; classic framed fronts are lacquered, with a soft clear coat
     M.front.color.set(COLORS[o.renk]);
-    M.front.roughness = o.kapak === 'klasik' ? .45 : .7;
+    M.front.roughness = o.kapak === 'klasik' ? .38 : .72;
+    M.front.clearcoat = o.kapak === 'klasik' ? .5 : 0;
+    M.front.clearcoatRoughness = .25;
     const cm = v => v / 100, A = cm(o.a), B = cm(o.b), C = cm(o.c), D = .6;
     const L = p.L, U = p.U, duz = o.tip === 'duz';
     const t = { x: cm(p.tall.x), z: cm(p.tall.y) };
@@ -218,13 +256,29 @@ export function mount(box) {
     else { front(o, '+x', t.z, t.z + D, PLINTH, 1.1, D - .02); front(o, '+x', t.z, t.z + D, 1.1, TALL_H, D - .02, 'bottom'); }
     block(M.plinth, duz ? 0 : .05, 0, duz ? .05 : t.z, duz ? D : D - .1, PLINTH, duz ? D - .1 : D);
 
-    // sink: a dark basin set into the worktop, and a black tap behind it
+    // sink: a steel rim with the basin sunk below it, and a black gooseneck tap behind
     const s = { x: cm(p.sink.x), w: cm(p.sink.w) };
-    block(M.black, s.x + .04, BASE_H - .005, .1, s.w - .08, .006, .38, 0, false);
-    const tap = new THREE.Mesh(new THREE.CylinderGeometry(.012, .014, .32, 12), M.black);
-    tap.position.set(s.x + s.w / 2, BASE_H + .16, .06); tap.castShadow = true; group.add(tap);
-    const spout = new THREE.Mesh(new THREE.CylinderGeometry(.01, .01, .2, 12), M.black);
-    spout.rotation.x = Math.PI / 2; spout.position.set(s.x + s.w / 2, BASE_H + .31, .15); group.add(spout);
+    block(M.steel, s.x + .02, BASE_H, .08, s.w - .04, .004, .44, .002, false);
+    block(M.basin, s.x + .05, BASE_H - .015, .11, s.w - .1, .02, .38, .01, false);
+    const tx = s.x + s.w / 2;
+    const tap = new THREE.Mesh(new THREE.CylinderGeometry(.013, .016, .3, 16), M.black);
+    tap.position.set(tx, BASE_H + .15, .06); tap.castShadow = true; group.add(tap);
+    const neck = new THREE.Mesh(new THREE.TorusGeometry(.07, .011, 10, 24, Math.PI), M.black);
+    neck.rotation.y = -Math.PI / 2; neck.position.set(tx, BASE_H + .3, .13); neck.castShadow = true; group.add(neck);
+
+    // a built-in oven under a hob that stands on a wall run: black glass with a steel bar
+    if (!p.island) {
+      const ox = cm(p.hob.x), oz = cm(p.hob.y), ow = cm(p.hob.w), od = cm(p.hob.h);
+      const y0 = PLINTH + .1, y1 = PLINTH + .68;
+      if (oz < .1) {
+        block(M.blackGlass, ox, y0, D - .02, ow, y1 - y0, FRONT_T + .002, .003);
+        block(M.steel, ox + .06, y1 - .06, D + .015, ow - .12, .016, .02, .006);
+      } else {
+        const right = ox > 1, plane = right ? A - D + .02 : D - .02;
+        block(M.blackGlass, right ? plane - FRONT_T - .002 : plane, y0, oz, FRONT_T + .002, y1 - y0, od, .003);
+        block(M.steel, right ? plane - .035 : plane + .015, y1 - .06, oz + .06, .02, .016, od - .12, .006);
+      }
+    }
 
     // the island: fronts towards the kitchen, overhang and stools towards the room, waterfall ends
     let il = null;
@@ -264,9 +318,22 @@ export function mount(box) {
         }
       }
     }
-    // the hob, on the island or on a wall run
-    const hobY = BASE_H + .001;
-    block(M.black, hob.x, hobY, hob.z, hob.w, .008, hob.d, .002, false);
+    // the hob, on the island or on a wall run: black glass flush with the worktop
+    block(M.blackGlass, hob.x, BASE_H, hob.z, hob.w, .006, hob.d, .002, false);
+
+    // pendant lights over the island: cord, black shade, warm bulb
+    if (il) {
+      const n = il.w >= 1.6 ? 3 : 2, drop = 1.62;
+      for (let i = 0; i < n; i++) {
+        const px = il.x + il.w * (i + .5) / n, pz = il.z + il.d / 2;
+        const cord = new THREE.Mesh(new THREE.CylinderGeometry(.003, .003, ROOM_H - drop - .2, 6), M.black);
+        cord.position.set(px, (ROOM_H + drop + .2) / 2, pz); group.add(cord);
+        const shade = new THREE.Mesh(new THREE.CylinderGeometry(.04, .14, .2, 32, 1, true), M.shade);
+        shade.position.set(px, drop + .1, pz); shade.castShadow = true; group.add(shade);
+        const bulb = new THREE.Mesh(new THREE.SphereGeometry(.035, 16, 12), M.bulb);
+        bulb.position.set(px, drop + .03, pz); group.add(bulb);
+      }
+    }
 
     // hidden LED: glowing strips under the wall units and the island overhang, warm point lights over the worktop
     if (o.led) {
@@ -279,7 +346,12 @@ export function mount(box) {
       for (let i = 0; i < nA; i++) warm(wa0 + (wa1 - wa0) * (i + .5) / nA, WALL_Y - .06, .22);
       if (L && B - D > 1) warm(.22, WALL_Y - .06, (WALL_D + B - D) / 2);
       if (U) warm(A - .22, WALL_Y - .06, (WALL_D + C) / 2);
-      if (il) { glow(il.x + .05, il.z + il.d - .05, il.w - .1, .02, PLINTH + CARCASS - .01); warm(il.x + il.w / 2, .45, il.z + il.d + .15, 1.4); }
+      if (il) {
+        glow(il.x + .05, il.z + il.d - .05, il.w - .1, .02, PLINTH + CARCASS - .01);
+        warm(il.x + il.w / 2, .45, il.z + il.d + .15, 1.4);
+        // the pendants lit: one wider light under them onto the island top
+        const l = new THREE.PointLight('#ffc98a', 2.2, 2.4, 2); l.position.set(il.x + il.w / 2, 1.5, il.z + il.d / 2); group.add(l);
+      }
     }
 
     // dimension tags in the room: walls along their top edge, the island over its top
@@ -287,6 +359,7 @@ export function mount(box) {
     if (L) tags.push([`B · ${o.b} cm`, new THREE.Vector3(-.05, ROOM_H + .08, B / 2)]);
     if (U) tags.push([`C · ${o.c} cm`, new THREE.Vector3(A + .05, ROOM_H + .08, C / 2)]);
     if (il) tags.push([`Ada · ${p.island.w} × ${p.island.h} cm`, new THREE.Vector3(il.x + il.w / 2, BASE_H + .12, il.z + il.d / 2)]);
+    else if (p.islandNote) tags.push([p.islandNote, new THREE.Vector3(A / 2, .05, roomD * .7)]);
     tagLayer.innerHTML = tags.map(([text]) => `<span>${text}</span>`).join('');
 
     // frame the kitchen: aim at its middle, back off far enough to see it whole, and look in from
@@ -301,14 +374,34 @@ export function mount(box) {
     sun.position.set(w / 2 + 3, 6, d + 4); sun.target.position.copy(view.target);
     const sc = sun.shadow.camera, ext = Math.max(w, d) / 2 + 1.5;
     sc.left = -ext; sc.right = ext; sc.top = ext; sc.bottom = -ext; sc.near = 1; sc.far = 20; sc.updateProjectionMatrix();
-    render();
+    move();
   }
 
-  function render() {
+  // ambient occlusion on wide screens, loaded after the first plain frame
+  let composer = null, settleTimer = 0;
+  if (!phone) {
+    Promise.all(['EffectComposer', 'RenderPass', 'GTAOPass', 'OutputPass'].map(n => import(`three/addons/postprocessing/${n}.js`)))
+      .then(([{ EffectComposer }, { RenderPass }, { GTAOPass }, { OutputPass }]) => {
+        const c = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 }));
+        c.addPass(new RenderPass(scene, camera));
+        const gtao = new GTAOPass(scene, camera, 1, 1);
+        gtao.updateGtaoMaterial({ radius: .25, distanceExponent: 1.5, thickness: 1, scale: 1.1, samples: 16 });
+        c.addPass(gtao);
+        c.addPass(new OutputPass());
+        composer = c;
+        resize();
+      })
+      .catch(err => console.warn('Ambient occlusion unavailable', err));
+  }
+  // while things move: the plain pass; once still for a moment: the full one
+  function move() { render(true); clearTimeout(settleTimer); settleTimer = setTimeout(settle, 160); }
+  function settle() { clearTimeout(settleTimer); render(false); }
+
+  function render(fast = false) {
     const { az, el, dist, target } = view;
     camera.position.set(target.x + Math.sin(az) * Math.cos(el) * dist, target.y + Math.sin(el) * dist, target.z + Math.cos(az) * Math.cos(el) * dist);
     camera.lookAt(target);
-    renderer.render(scene, camera);
+    if (composer && !fast) composer.render(); else renderer.render(scene, camera);
     // tags follow their 3D points; one that would overlap a tag already placed steps down below it
     const W = canvas.clientWidth, H = canvas.clientHeight, v = new THREE.Vector3(), placed = [];
     tags.forEach(([, point], i) => {
@@ -329,8 +422,9 @@ export function mount(box) {
     const w = canvas.clientWidth, h = canvas.clientHeight;
     if (!w || !h) return;
     renderer.setSize(w, h, false);
+    if (composer) { composer.setPixelRatio(renderer.getPixelRatio()); composer.setSize(w, h); }
     camera.aspect = w / h; camera.updateProjectionMatrix();
-    render();
+    settle();
   }
   new ResizeObserver(resize).observe(canvas);
 
@@ -343,7 +437,7 @@ export function mount(box) {
     if (!drag || e.pointerId !== drag.id) return;
     view.az = Math.min(AZ[1], Math.max(AZ[0], drag.az - (e.clientX - drag.x) * .006));
     if (drag.mouse) view.el = Math.min(EL[1], Math.max(EL[0], drag.el + (e.clientY - drag.y) * .004));
-    render();
+    move();
   });
   const end = () => { drag = null; };
   canvas.addEventListener('pointerup', end); canvas.addEventListener('pointercancel', end);
@@ -353,7 +447,7 @@ export function mount(box) {
     e.preventDefault();
     view.az = Math.min(AZ[1], Math.max(AZ[0], view.az + k[0]));
     view.el = Math.min(EL[1], Math.max(EL[0], view.el + k[1]));
-    render();
+    move();
   });
 
   resize();
