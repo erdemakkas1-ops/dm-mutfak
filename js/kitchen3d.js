@@ -22,16 +22,20 @@ export function mount(box) {
   const phone = matchMedia('(max-width:760px)').matches;
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, phone ? 1.25 : 1.5));
+  // full device resolution (capped at 2) so edges stay crisp; the scene is cheap enough for it
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
   renderer.toneMapping = THREE.NeutralToneMapping;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  // the sun does not move with the camera: shadows are redrawn only when the kitchen changes
+  renderer.shadowMap.autoUpdate = false;
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#e9e7e2');
   scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), .04).texture;
   scene.environmentIntensity = .45;
-  const camera = new THREE.PerspectiveCamera(32, 1, .1, 60);
+  // a standing person's view: eye height about 1.6 m, a 35 mm-like field of view
+  const camera = new THREE.PerspectiveCamera(42, 1, .1, 60);
 
   // ---- textures ----
   let seed = 11;
@@ -128,7 +132,17 @@ export function mount(box) {
   scene.add(sun, sun.target);
 
   let group = null, tags = [], lastTip = null, AZ = [-1.2, 1.2];
-  const view = { az: -.55, el: .5, dist: 6, target: new THREE.Vector3() };
+  const view = { az: 0, el: .1, dist: 6, target: new THREE.Vector3() };
+
+  // a fixed pool of warm lights for the LEDs and the pendants. The number of lights in a scene is
+  // compiled into every shader, so lights are moved and dimmed, never added or removed: switching
+  // the LEDs or changing a length then costs no shader recompilation (that was a ~1 s freeze).
+  const POOL = 8;  // 4 under run A, 1 each for B and C, 2 for the island
+  const pool = Array.from({ length: POOL }, () => { const l = new THREE.PointLight('#ffb866', 0, 1.6, 2); scene.add(l); return l; });
+
+  // shared geometries for the round parts, so a rebuild creates no new buffers
+  const roundCache = new Map();
+  const round = (key, make) => { if (!roundCache.has(key)) roundCache.set(key, make()); return roundCache.get(key); };
 
   const geoCache = new Map();
   const geo = (w, h, d, r = 0) => {
@@ -161,14 +175,28 @@ export function mount(box) {
       else block(mat, plane + dt, cy + dy, u0 + GAP + du, pt, ph, pw, .003);
     }
   }
-  // a run of base fronts between u0 and u1 (metres), one drawer stack per ~60 cm
-  function baseFronts(o, face, u0, u1, plane) {
+  // a flat panel on a run's face, `out` metres in front of the face plane
+  function panel(mat, face, u0, u1, y0, y1, plane, t, out = 0) {
+    if (face === 'z') block(mat, u0, y0, plane + out, u1 - u0, y1 - y0, t, .003);
+    else if (face === '-x') block(mat, plane - out - t, y0, u0, t, y1 - y0, u1 - u0, .003);
+    else block(mat, plane + out, y0, u0, t, y1 - y0, u1 - u0, .003);
+  }
+  // a run of base fronts between u0 and u1 (metres), one drawer stack per ~60 cm; the module under
+  // a wall hob (oven: { face, at }) gets a built-in oven over a low drawer instead
+  function baseFronts(o, face, u0, u1, plane, oven) {
     const n = Math.max(1, Math.round((u1 - u0) / .6));
+    const yTop = PLINTH + CARCASS - (o.kapak === 'kulpsuz' ? .03 : 0);
     for (let i = 0; i < n; i++) {
       const a = u0 + (u1 - u0) * i / n, b = u0 + (u1 - u0) * (i + 1) / n;
+      if (oven && oven.face === face && oven.at >= a && oven.at < b) {
+        front(o, face, a, b, PLINTH, PLINTH + .16, plane);
+        panel(M.blackGlass, face, a + GAP, b - GAP, PLINTH + .16 + GAP, yTop - GAP, plane, FRONT_T + .002);
+        panel(M.steel, face, a + .06, b - .06, yTop - .075, yTop - .058, plane, .02, FRONT_T + .002);
+        continue;
+      }
       // two drawers on even modules, a door on odd ones, like most of their kitchens
-      if (i % 2 === 0) { front(o, face, a, b, PLINTH, PLINTH + .36, plane); front(o, face, a, b, PLINTH + .36, PLINTH + CARCASS - (o.kapak === 'kulpsuz' ? .03 : 0), plane); }
-      else front(o, face, a, b, PLINTH, PLINTH + CARCASS - (o.kapak === 'kulpsuz' ? .03 : 0), plane);
+      if (i % 2 === 0) { front(o, face, a, b, PLINTH, PLINTH + .36, plane); front(o, face, a, b, PLINTH + .36, yTop, plane); }
+      else front(o, face, a, b, PLINTH, yTop, plane);
     }
     // the handle-less grip groove under the worktop
     if (o.kapak === 'kulpsuz') {
@@ -199,7 +227,8 @@ export function mount(box) {
     // handle-less fronts are matt; classic framed fronts are lacquered, with a soft clear coat
     M.front.color.set(COLORS[o.renk]);
     M.front.roughness = o.kapak === 'klasik' ? .38 : .72;
-    M.front.clearcoat = o.kapak === 'klasik' ? .5 : 0;
+    // (never exactly 0: a clear coat of 0 is a different shader, and switching would recompile)
+    M.front.clearcoat = o.kapak === 'klasik' ? .5 : .01;
     M.front.clearcoatRoughness = .25;
     const cm = v => v / 100, A = cm(o.a), B = cm(o.b), C = cm(o.c), D = .6;
     const L = p.L, U = p.U, duz = o.tip === 'duz';
@@ -211,13 +240,18 @@ export function mount(box) {
     if (L) block(M.wall, -.1, 0, 0, .1, ROOM_H, Math.max(B, 1.2) + .3);
     if (U) block(M.wall, A, 0, 0, .1, ROOM_H, Math.max(C, 1.2) + .3);
 
+    // where the oven goes: under a hob that stands on a wall run (with an island the hob is on the island)
+    const oven = p.island ? null : cm(p.hob.y) < .1
+      ? { face: 'z', at: cm(p.hob.x + p.hob.w / 2) }
+      : { face: cm(p.hob.x) > 1 ? '-x' : '+x', at: cm(p.hob.y + p.hob.h / 2) };
+
     // run A: carcass, worktop, fronts and the marble splash behind it
     const a0 = duz ? D : 0, a1 = A;
     block(M.plinth, a0, 0, .05, a1 - a0, PLINTH, D - .1);
     block(M.carcass, a0, PLINTH, 0, a1 - a0, CARCASS, D - .02);
     block(M.top, a0, PLINTH + CARCASS, 0, a1 - a0, TOP, D + .02, .004);
     block(M.splash, a0, BASE_H, 0, a1 - a0, WALL_Y - BASE_H, .015, 0, false);
-    baseFronts(o, 'z', duz ? D : L ? D : 0, U ? A - D : A, D - .02);
+    baseFronts(o, 'z', duz ? D : L ? D : 0, U ? A - D : A, D - .02, oven);
     // run B along the left wall, run C along the right
     if (L) {
       const z1 = B - D;
@@ -225,14 +259,14 @@ export function mount(box) {
       block(M.carcass, 0, PLINTH, D, D - .02, CARCASS, z1 - D);
       block(M.top, 0, PLINTH + CARCASS, D, D + .02, TOP, z1 - D, .004);
       block(M.splash, 0, BASE_H, D, .015, WALL_Y - BASE_H, z1 - D, 0, false);
-      if (z1 - D > .2) baseFronts(o, '+x', D, z1, D - .02);
+      if (z1 - D > .2) baseFronts(o, '+x', D, z1, D - .02, oven);
     }
     if (U) {
       block(M.plinth, A - D + .05, 0, D, D - .1, PLINTH, C - D);
       block(M.carcass, A - D + .02, PLINTH, D, D - .02, CARCASS, C - D);
       block(M.top, A - D - .02, PLINTH + CARCASS, D, D + .02, TOP, C - D, .004);
       block(M.splash, A - .015, BASE_H, D, .015, WALL_Y - BASE_H, C - D, 0, false);
-      baseFronts(o, '-x', D, C, A - D + .02);
+      baseFronts(o, '-x', D, C, A - D + .02, oven);
     }
 
     // wall units; a cooker hood instead of them over a hob on the wall
@@ -261,24 +295,10 @@ export function mount(box) {
     block(M.steel, s.x + .02, BASE_H, .08, s.w - .04, .004, .44, .002, false);
     block(M.basin, s.x + .05, BASE_H - .015, .11, s.w - .1, .02, .38, .01, false);
     const tx = s.x + s.w / 2;
-    const tap = new THREE.Mesh(new THREE.CylinderGeometry(.013, .016, .3, 16), M.black);
+    const tap = new THREE.Mesh(round('tap', () => new THREE.CylinderGeometry(.013, .016, .3, 16)), M.black);
     tap.position.set(tx, BASE_H + .15, .06); tap.castShadow = true; group.add(tap);
-    const neck = new THREE.Mesh(new THREE.TorusGeometry(.07, .011, 10, 24, Math.PI), M.black);
+    const neck = new THREE.Mesh(round('neck', () => new THREE.TorusGeometry(.07, .011, 10, 24, Math.PI)), M.black);
     neck.rotation.y = -Math.PI / 2; neck.position.set(tx, BASE_H + .3, .13); neck.castShadow = true; group.add(neck);
-
-    // a built-in oven under a hob that stands on a wall run: black glass with a steel bar
-    if (!p.island) {
-      const ox = cm(p.hob.x), oz = cm(p.hob.y), ow = cm(p.hob.w), od = cm(p.hob.h);
-      const y0 = PLINTH + .1, y1 = PLINTH + .68;
-      if (oz < .1) {
-        block(M.blackGlass, ox, y0, D - .02, ow, y1 - y0, FRONT_T + .002, .003);
-        block(M.steel, ox + .06, y1 - .06, D + .015, ow - .12, .016, .02, .006);
-      } else {
-        const right = ox > 1, plane = right ? A - D + .02 : D - .02;
-        block(M.blackGlass, right ? plane - FRONT_T - .002 : plane, y0, oz, FRONT_T + .002, y1 - y0, od, .003);
-        block(M.steel, right ? plane - .035 : plane + .015, y1 - .06, oz + .06, .02, .016, od - .12, .006);
-      }
-    }
 
     // the island: fronts towards the kitchen, overhang and stools towards the room, waterfall ends
     let il = null;
@@ -310,10 +330,10 @@ export function mount(box) {
       const nStools = Math.max(1, Math.min(4, Math.floor(il.w / .6)));
       for (let i = 0; i < nStools; i++) {
         const sx = il.x + il.w * (i + .5) / nStools, sz = il.z + il.d + .12;
-        const seat = new THREE.Mesh(new THREE.CylinderGeometry(.19, .17, .06, 28), M.seat);
+        const seat = new THREE.Mesh(round('seat', () => new THREE.CylinderGeometry(.19, .17, .06, 28)), M.seat);
         seat.position.set(sx, .66, sz); seat.castShadow = true; group.add(seat);
         for (const [dx, dz] of [[-.12, -.12], [.12, -.12], [-.12, .12], [.12, .12]]) {
-          const leg = new THREE.Mesh(new THREE.CylinderGeometry(.01, .012, .64, 8), M.seat);
+          const leg = new THREE.Mesh(round('leg', () => new THREE.CylinderGeometry(.01, .012, .64, 8)), M.seat);
           leg.position.set(sx + dx * .9, .32, sz + dz * .9); leg.rotation.set(dz * .5, 0, -dx * .5); leg.castShadow = true; group.add(leg);
         }
       }
@@ -321,28 +341,29 @@ export function mount(box) {
     // the hob, on the island or on a wall run: black glass flush with the worktop
     block(M.blackGlass, hob.x, BASE_H, hob.z, hob.w, .006, hob.d, .002, false);
 
-    // pendant lights over the island: cord, black shade, warm bulb
+    // pendant lights over the island: cord, black shade, warm bulb; the shade's rim 86 cm above the top
     if (il) {
-      const n = il.w >= 1.6 ? 3 : 2, drop = 1.62;
+      const n = il.w >= 1.6 ? 3 : 2, drop = BASE_H + .86;
       for (let i = 0; i < n; i++) {
         const px = il.x + il.w * (i + .5) / n, pz = il.z + il.d / 2;
-        const cord = new THREE.Mesh(new THREE.CylinderGeometry(.003, .003, ROOM_H - drop - .2, 6), M.black);
+        const cord = new THREE.Mesh(round('cord', () => new THREE.CylinderGeometry(.003, .003, ROOM_H - drop - .2, 6)), M.black);
         cord.position.set(px, (ROOM_H + drop + .2) / 2, pz); group.add(cord);
-        const shade = new THREE.Mesh(new THREE.CylinderGeometry(.04, .14, .2, 32, 1, true), M.shade);
+        const shade = new THREE.Mesh(round('shade', () => new THREE.CylinderGeometry(.04, .14, .2, 32, 1, true)), M.shade);
         shade.position.set(px, drop + .1, pz); shade.castShadow = true; group.add(shade);
-        const bulb = new THREE.Mesh(new THREE.SphereGeometry(.035, 16, 12), M.bulb);
+        const bulb = new THREE.Mesh(round('bulb', () => new THREE.SphereGeometry(.035, 16, 12)), M.bulb);
         bulb.position.set(px, drop + .03, pz); group.add(bulb);
       }
     }
 
-    // hidden LED: glowing strips under the wall units and the island overhang, warm point lights over the worktop
+    // hidden LED: glowing strips under the wall units and the island overhang, warm lights from the pool
+    const lit = [];
+    const warm = (x, y, z, k = .6, dist = 1.6, color = '#ffb866') => lit.push([x, y, z, k, dist, color]);
     if (o.led) {
       const glow = (x, z, w, d, y) => block(M.led, x, y, z, w, .008, d, 0, false);
       glow(wa0 + .02, WALL_D - .08, wa1 - wa0 - .04, .03, WALL_Y - .01);
       if (L && B - D > WALL_D + .3) glow(WALL_D - .08, WALL_D + .02, .03, B - D - WALL_D - .04, WALL_Y - .01);
       if (U) glow(A - WALL_D + .05, WALL_D + .02, .03, C - WALL_D - .04, WALL_Y - .01);
-      const warm = (x, y, z, k = .9) => { const l = new THREE.PointLight('#ffb866', k, 1.6, 2); l.position.set(x, y, z); group.add(l); };
-      const nA = Math.max(1, Math.round((wa1 - wa0) / 1.2));
+      const nA = Math.min(4, Math.max(1, Math.round((wa1 - wa0) / 1.2)));
       for (let i = 0; i < nA; i++) warm(wa0 + (wa1 - wa0) * (i + .5) / nA, WALL_Y - .06, .22);
       if (L && B - D > 1) warm(.22, WALL_Y - .06, (WALL_D + B - D) / 2);
       if (U) warm(A - .22, WALL_Y - .06, (WALL_D + C) / 2);
@@ -350,9 +371,14 @@ export function mount(box) {
         glow(il.x + .05, il.z + il.d - .05, il.w - .1, .02, PLINTH + CARCASS - .01);
         warm(il.x + il.w / 2, .45, il.z + il.d + .15, 1.4);
         // the pendants lit: one wider light under them onto the island top
-        const l = new THREE.PointLight('#ffc98a', 2.2, 2.4, 2); l.position.set(il.x + il.w / 2, 1.5, il.z + il.d / 2); group.add(l);
+        warm(il.x + il.w / 2, 1.5, il.z + il.d / 2, 2.2, 2.4, '#ffc98a');
       }
     }
+    pool.forEach((l, i) => {
+      const s = lit[i];
+      l.intensity = s ? s[3] : 0;
+      if (s) { l.position.set(s[0], s[1], s[2]); l.distance = s[4]; l.color.set(s[5]); }
+    });
 
     // dimension tags in the room: walls along their top edge, the island over its top
     tags = [[`A · ${o.a} cm`, new THREE.Vector3(A / 2, ROOM_H + .08, -.05)]];
@@ -362,19 +388,35 @@ export function mount(box) {
     else if (p.islandNote) tags.push([p.islandNote, new THREE.Vector3(A / 2, .05, roomD * .7)]);
     tagLayer.innerHTML = tags.map(([text]) => `<span>${text}</span>`).join('');
 
-    // frame the kitchen: aim at its middle, back off far enough to see it whole, and look in from
-    // the open side when the plan type changes (an L's left wall would otherwise stand in front)
+    // frame the kitchen from the front at eye level: aim at the middle of the wall run, half room
+    // height, and stand back just far enough to see the whole width and height (frame() below)
     const w = A, d = roomD;
-    view.target.set(w / 2, 1, Math.min(d, 3.4) / 2);
-    view.dist = Math.max(w, d * 1.1, 3.2) * (phone ? 1.8 : 1.75) + 1.2;
-    if (o.tip !== lastTip) { view.az = { duz: -.35, l: .55, u: 0 }[o.tip]; view.el = .5; lastTip = o.tip; }
+    view.target.set(w / 2, 1.25, il ? (il.z + il.d) / 2 : .6);
+    view.fit = { halfW: w / 2 + .45, halfH: (ROOM_H + .3) / 2, front: (il ? il.z + il.d + .6 : D + .4) - view.target.z };
+    if (o.tip !== lastTip) { view.az = { duz: 0, l: .22, u: 0 }[o.tip]; view.el = .1; lastTip = o.tip; }
     // how far it may turn: never round behind a side wall
-    AZ = { duz: [-1.2, 1.2], l: [-.15, 1.2], u: [-.6, .6] }[o.tip];
+    AZ = { duz: [-1, 1], l: [-.15, .9], u: [-.45, .45] }[o.tip];
+    frame();
     floor.position.set(w / 2, 0, d / 2);
     sun.position.set(w / 2 + 3, 6, d + 4); sun.target.position.copy(view.target);
     const sc = sun.shadow.camera, ext = Math.max(w, d) / 2 + 1.5;
     sc.left = -ext; sc.right = ext; sc.top = ext; sc.bottom = -ext; sc.near = 1; sc.far = 20; sc.updateProjectionMatrix();
+    renderer.shadowMap.needsUpdate = true;
     move();
+  }
+
+  // the distance at which the kitchen's width and height both fit the view, kept clear of the island
+  function frame() {
+    const f = view.fit; if (!f) return;
+    const tv = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), th = tv * camera.aspect;
+    view.dist = Math.max(f.halfW / th, f.halfH / tv, f.front + 1.2) + .3;
+  }
+
+  // a change of options rebuilds the scene at most once per frame, however fast the slider moves
+  let pending = null, buildFrame = 0;
+  function update(o, p) {
+    pending = [o, p];
+    if (!buildFrame) buildFrame = requestAnimationFrame(() => { buildFrame = 0; build(...pending); });
   }
 
   // ambient occlusion on wide screens, loaded after the first plain frame
@@ -393,9 +435,13 @@ export function mount(box) {
       })
       .catch(err => console.warn('Ambient occlusion unavailable', err));
   }
-  // while things move: the plain pass; once still for a moment: the full one
-  function move() { render(true); clearTimeout(settleTimer); settleTimer = setTimeout(settle, 160); }
-  function settle() { clearTimeout(settleTimer); render(false); }
+  // while things move: the plain pass, at most once per frame; once still for a moment: the full one
+  let moveFrame = 0;
+  function move() {
+    if (!moveFrame) moveFrame = requestAnimationFrame(() => { moveFrame = 0; render(true); });
+    clearTimeout(settleTimer); settleTimer = setTimeout(settle, 180);
+  }
+  function settle() { clearTimeout(settleTimer); cancelAnimationFrame(moveFrame); moveFrame = 0; render(false); }
 
   function render(fast = false) {
     const { az, el, dist, target } = view;
@@ -424,13 +470,14 @@ export function mount(box) {
     renderer.setSize(w, h, false);
     if (composer) { composer.setPixelRatio(renderer.getPixelRatio()); composer.setSize(w, h); }
     camera.aspect = w / h; camera.updateProjectionMatrix();
+    frame();
     settle();
   }
   new ResizeObserver(resize).observe(canvas);
 
   // turning: horizontal drag sets the azimuth; a mouse drag also tilts. AZ (set per plan type in build)
   // keeps the open side towards us.
-  const EL = [.18, 1.05];
+  const EL = [.03, .6];
   let drag = null;
   canvas.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, az: view.az, el: view.el, id: e.pointerId, mouse: e.pointerType === 'mouse' }; canvas.setPointerCapture(e.pointerId); });
   canvas.addEventListener('pointermove', e => {
@@ -451,5 +498,5 @@ export function mount(box) {
   });
 
   resize();
-  return { update: build };
+  return { update };
 }

@@ -178,7 +178,7 @@
     const start = () => {
       if (started) return;
       started = true; io.disconnect();
-      import('./kitchen3d.js?v=6').then(m => {
+      import('./kitchen3d.js?v=10').then(m => {
         view3d = m.mount(sheet);
         sheet.classList.replace('wait3d', 'is3d');
         update();
