@@ -167,19 +167,26 @@
   form.addEventListener('submit', e => e.preventDefault());
   update();
 
-  // 3D: load three.js when the section is about 600 px away, if the device has WebGL2
+  // 3D: with WebGL2 the sheet waits for the 3D kitchen (a loading note, not the plan); three.js starts
+  // loading once the page has loaded, or earlier if the section comes within ~600 px. The plan shows
+  // only when there is no WebGL2 or the 3D view fails.
   const sheet = svg.closest('.sheet');
   const hasGL = (() => { try { return !!document.createElement('canvas').getContext('webgl2'); } catch { return false; } })();
   if (hasGL) {
-    const io = new IntersectionObserver(es => {
-      if (!es.some(e => e.isIntersecting)) return;
-      io.disconnect();
-      import('./kitchen3d.js').then(m => {
-        sheet.classList.add('is3d');
+    sheet.classList.add('wait3d');
+    let started = false;
+    const start = () => {
+      if (started) return;
+      started = true; io.disconnect();
+      import('./kitchen3d.js?v=4').then(m => {
         view3d = m.mount(sheet);
+        sheet.classList.replace('wait3d', 'is3d');
         update();
-      }).catch(err => { sheet.classList.remove('is3d'); console.warn('3D view unavailable, showing the plan', err); });
-    }, { rootMargin: '600px 0px' });
+      }).catch(err => { sheet.classList.remove('wait3d', 'is3d'); console.warn('3D view unavailable, showing the plan', err); });
+    };
+    const io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) start(); }, { rootMargin: '600px 0px' });
     io.observe(sheet);
+    if (document.readyState === 'complete') setTimeout(start, 300);
+    else addEventListener('load', () => setTimeout(start, 300), { once: true });
   }
 })();

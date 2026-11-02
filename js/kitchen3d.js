@@ -15,6 +15,7 @@ const COLORS = { grej: '#b9b0a5', krem: '#e6dccb', beyaz: '#f3f2ee', gri: '#7d81
 export function mount(box) {
   const canvas = box.querySelector('canvas');
   const tagLayer = box.querySelector('.k3d-tags');
+  tagLayer.textContent = '';
   const phone = matchMedia('(max-width:760px)').matches;
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -310,8 +311,10 @@ export function mount(box) {
     renderer.render(scene, camera);
     // tags follow their 3D points; one that would overlap a tag already placed steps down below it
     const W = canvas.clientWidth, H = canvas.clientHeight, v = new THREE.Vector3(), placed = [];
-    [...tagLayer.children].forEach((el, i) => {
-      v.copy(tags[i][1]).project(camera);
+    tags.forEach(([, point], i) => {
+      const el = tagLayer.children[i];
+      if (!el) return;
+      v.copy(point).project(camera);
       const w = el.offsetWidth, h = el.offsetHeight;
       const x = Math.min(W - w - 6, Math.max(6, (v.x + 1) / 2 * W - w / 2));
       let y = Math.max(6, (1 - v.y) / 2 * H - h / 2);
