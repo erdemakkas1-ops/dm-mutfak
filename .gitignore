@@ -1,0 +1,6 @@
+instagram-raw/
+gemini/
+__pycache__/
+.vercel
+.env*
+.playwright-mcp/
