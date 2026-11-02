@@ -38,10 +38,17 @@ portrait screens), scrubbed over film seconds 0–12:
   Oda, Kurumsal). Each card links to the original post.
 - **Işık**: the day and evening frames under a draggable divider (a range input, so it works with
   keys and touch), their own line about light, LED colour temperatures.
-- **Mutfağını planla** (`js/plan.js`): düz / L / U, wall lengths, island, door style and colour, LED.
-  Draws a top-down plan in cm (60 cm base runs, 35 cm wall cabinets, a 110 cm aisle to the island,
-  100 cm from a side run) and works out worktop length, module count and island size. "Teklif al"
-  opens WhatsApp with the plan. The figures are a first idea, not a quote.
+- **Mutfağını tasarla**: düz / L / U, wall lengths, island, door style and colour, LED.
+  `js/plan.js` works out the layout in cm (60 cm base runs, 35 cm wall cabinets, a 110 cm aisle to
+  the island, 100 cm from a side run), the worktop length, module count and island size, and the
+  WhatsApp message. `js/kitchen3d.js` builds that layout in 3D with three.js r180 (`js/vendor/`,
+  mapped by the import map in `<head>`): plinth, carcasses, drawer and door fronts (handle-less
+  with a grip groove, or classic framed with a knob), marble worktop and splash, wall units with a
+  glass vitrin, fridge column, sink, hob or hood, island with waterfall ends and stools, and the
+  LED strips with warm lights. It loads when the section is ~600 px away, renders on demand, and
+  turns by dragging sideways (mouse drags also tilt; arrow keys on the focused view). The turn is
+  limited per plan type so a side wall never blocks the view. Without WebGL2, or until three.js
+  arrives, the SVG top-down plan shows instead. The figures are a first idea, not a quote.
 - **Mağazalar**: Kırklareli shop and Pınarhisar workshop with map links.
 - **İletişim**: phones, e-mail and a form that writes a WhatsApp message (no server).
 

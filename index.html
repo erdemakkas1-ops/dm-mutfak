@@ -18,6 +18,16 @@
   document.documentElement.classList.add('js');
   if (!matchMedia('(prefers-reduced-motion: reduce)').matches && !/[?&]still\b/.test(location.search)) document.documentElement.classList.add('live-film');
 </script>
+<!-- three.js r180, served from js/vendor; loaded only when the 3D kitchen section is near -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "./js/vendor/three.module.min.js",
+    "three/addons/environments/RoomEnvironment.js": "./js/vendor/RoomEnvironment.js",
+    "three/addons/geometries/RoundedBoxGeometry.js": "./js/vendor/RoundedBoxGeometry.js"
+  }
+}
+</script>
 <link rel="preload" href="fonts/jost-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="css/site.css">
 <script type="application/ld+json">
@@ -66,7 +76,7 @@
   <nav class="nav" id="nav" aria-label="Ana menü">
     <a href="#projeler">Projeler</a>
     <a href="#isik">Işık</a>
-    <a href="#planla">Mutfağını planla</a>
+    <a href="#planla">Mutfağını tasarla</a>
     <a href="#magazalar">Mağazalar</a>
     <a class="btn btn--line" href="#iletisim">Ölçü randevusu</a>
   </nav>
@@ -250,14 +260,19 @@
   <section class="plan wrap" id="planla" aria-labelledby="plan-h">
     <div class="plan-head">
       <div>
-        <p class="eyebrow">Mutfağını planla</p>
-        <h2 id="plan-h">Duvarınızın ölçüsüyle bir ön plan.</h2>
+        <p class="eyebrow">Mutfağını tasarla</p>
+        <h2 id="plan-h">Duvarınızın ölçüsüyle, üç boyutlu.</h2>
       </div>
-      <p>Mutfak tipini ve duvar uzunluklarını girin; plan, tezgah uzunluğu ve modül sayısı hemen çıkar. Sonucu WhatsApp’tan gönderin, kesin ölçüyü yerinde alalım.</p>
+      <p>Mutfak tipini ve duvar uzunluklarını girin, kapak rengini seçin; mutfağınız 3D olarak kurulur, tezgah uzunluğu ve modül sayısı hemen çıkar. Sonucu WhatsApp’tan gönderin, kesin ölçüyü yerinde alalım.</p>
     </div>
     <div class="plan-body">
       <div class="plan-stage">
-        <figure class="sheet"><svg id="plan-svg" viewBox="0 0 800 600" role="img" aria-labelledby="plan-cap"></svg></figure>
+        <figure class="sheet">
+          <svg id="plan-svg" viewBox="0 0 800 600" role="img" aria-labelledby="plan-cap"></svg>
+          <canvas id="k3d" tabindex="0" role="img" aria-labelledby="plan-cap"></canvas>
+          <div class="k3d-tags" aria-hidden="true"></div>
+          <span class="k3d-hint" aria-hidden="true"><svg><use href="#i-drag"/></svg>Sürükleyerek çevirin</span>
+        </figure>
         <p class="sheet-cap"><span id="plan-cap">Üstten plan</span><span>Ölçüler cm · ön fikir içindir</span></p>
         <ul class="board" aria-label="Seçimleriniz">
           <li><span class="sw door" id="sw-door"></span><b>Kapak</b><span class="v" id="v-door"></span></li>

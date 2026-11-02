@@ -1,7 +1,8 @@
-// Mutfağını planla: a top-down kitchen plan in centimetres, drawn from the options.
+// Mutfağını tasarla: a kitchen layout in centimetres, worked out from the options.
 // Base runs are 60 cm deep, wall cabinets 35 cm, the island keeps a 110 cm aisle from the counter
-// and 100 cm from a side run.
-// The spec list and the WhatsApp message are worked out from the same plan.
+// and 100 cm from a side run. js/kitchen3d.js builds it in 3D once the section is near; until then,
+// and on devices without WebGL2, the same layout is drawn as a top-down plan in the SVG.
+// The spec list and the WhatsApp message are worked out from the same layout.
 (() => {
   const DEPTH = 60, WALL_CAB = 35, AISLE = 110, ISLAND_D = 100, CLEAR = 100, OPEN = 30, WALL_T = 12;
   const COLORS = { grej: '#b9b0a5', krem: '#e6dccb', beyaz: '#f3f2ee', gri: '#7d8184', antrasit: '#34363a' };
@@ -139,9 +140,9 @@
       ['Gizli LED', o.led ? 'Dolap altı ve ada altı' : 'Yok'],
     ];
     spec.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
-    const msg = ['Merhaba D&M, sitenizde planladığım mutfak için teklif almak istiyorum.', ...rows.map(([k, v]) => `${k}: ${v}`), 'Kesin ölçüyü yerinde alalım.'].join('\n');
+    const msg = ['Merhaba D&M, sitenizde tasarladığım mutfak için teklif almak istiyorum.', ...rows.map(([k, v]) => `${k}: ${v}`), 'Kesin ölçüyü yerinde alalım.'].join('\n');
     send.href = `https://wa.me/905335449880?text=${encodeURIComponent(msg)}`;
-    $('plan-cap').textContent = `Üstten plan · ${NAMES.tip[o.tip]} mutfak${p.island ? ', adalı' : ''}, ${NAMES.kapak[o.kapak].toLocaleLowerCase('tr')} ${NAMES.renk[o.renk].toLocaleLowerCase('tr')} kapak`;
+    $('plan-cap').textContent = `${view3d ? '3D görünüm' : 'Üstten plan'} · ${NAMES.tip[o.tip]} mutfak${p.island ? ', adalı' : ''}, ${NAMES.kapak[o.kapak].toLocaleLowerCase('tr')} ${NAMES.renk[o.renk].toLocaleLowerCase('tr')} kapak`;
     for (const k of ['a', 'b', 'c']) $('o-' + k).textContent = `${o[k]} cm`;
     $('row-b').hidden = !p.L; $('row-c').hidden = !p.U;
     // board
@@ -156,8 +157,29 @@
     $('v-led').textContent = o.led ? 'Gizli LED · 2700 K' : 'LED yok';
   }
 
-  function update() { const o = read(), p = layout(o); draw(o, p); describe(o, p); }
+  let view3d = null;
+  function update() {
+    const o = read(), p = layout(o);
+    if (view3d) view3d.update(o, p); else draw(o, p);
+    describe(o, p);
+  }
   form.addEventListener('input', update);
   form.addEventListener('submit', e => e.preventDefault());
   update();
+
+  // 3D: load three.js when the section is about 600 px away, if the device has WebGL2
+  const sheet = svg.closest('.sheet');
+  const hasGL = (() => { try { return !!document.createElement('canvas').getContext('webgl2'); } catch { return false; } })();
+  if (hasGL) {
+    const io = new IntersectionObserver(es => {
+      if (!es.some(e => e.isIntersecting)) return;
+      io.disconnect();
+      import('./kitchen3d.js').then(m => {
+        sheet.classList.add('is3d');
+        view3d = m.mount(sheet);
+        update();
+      }).catch(err => { sheet.classList.remove('is3d'); console.warn('3D view unavailable, showing the plan', err); });
+    }, { rootMargin: '600px 0px' });
+    io.observe(sheet);
+  }
 })();
