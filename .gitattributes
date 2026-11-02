@@ -1,0 +1,6 @@
+# keep LF everywhere: the CSP in index.html hashes its inline scripts byte for byte
+* text=auto eol=lf
+*.webp binary
+*.jpg binary
+*.png binary
+*.woff2 binary
