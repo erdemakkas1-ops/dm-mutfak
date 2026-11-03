@@ -74,6 +74,8 @@
     const smooth = (a, b, v) => { const x = clamp((v - a) / (b - a)); return x * x * (3 - 2 * x); };
     const stage = $('.stage', film), frames = $('.frames', film), seam = $('.seam', film);
     const f2 = $('.fr-2 img', film), f3 = $('.fr-3 img', film), f4 = $('.fr-4 img', film);
+    // decode the later frames up front, so the first cross-fade or wipe never waits for a picture
+    [f2, f3, f4].forEach(img => img.decode?.().catch(() => {}));
     const intro = $('.intro', film), introShade = $('.scrim-intro', film), chaps = $$('.chap', film), endEl = $('.end', film), rail = $('.rail', film), railBtns = $$('button', rail);
     const pt = s => s && s.split(',').map(Number);
     const tags = $$('.tag', film).map(el => ({ el, d: pt(el.dataset.d), m: pt(el.dataset.m), from: +el.dataset.from, to: +el.dataset.to }));
