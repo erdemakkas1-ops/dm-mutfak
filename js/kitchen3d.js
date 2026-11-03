@@ -391,7 +391,7 @@ export function mount(box) {
     // frame the kitchen from the front at eye level: aim at the middle of the wall run, half room
     // height, and stand back just far enough to see the whole width and height (frame() below)
     const w = A, d = roomD;
-    view.target.set(w / 2, 1.25, il ? (il.z + il.d) / 2 : .6);
+    view.target.set(w / 2, 1.15, il ? (il.z + il.d) / 2 : .6);
     view.fit = { halfW: w / 2 + .45, halfH: (ROOM_H + .3) / 2, front: (il ? il.z + il.d + .6 : D + .4) - view.target.z };
     if (o.tip !== lastTip) { view.az = { duz: 0, l: .22, u: 0 }[o.tip]; view.el = .1; lastTip = o.tip; }
     // how far it may turn: never round behind a side wall
